@@ -6,3 +6,5 @@ checkpoint
 *.npy
 model.ckpt-*
 
+snapshots/*
+*.sh
