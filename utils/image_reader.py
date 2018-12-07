@@ -100,6 +100,7 @@ def _random_crop_and_pad_image_and_labels(image, label, crop_h, crop_w, ignore_l
     combined_crop = tf.random_crop(combined_pad, [crop_h, crop_w, 4])
     img_crop = combined_crop[:, :, :last_image_dim]
     label_crop = combined_crop[:, :, last_image_dim:]
+    label_crop = label_crop + ignore_label
     label_crop = tf.cast(label_crop, dtype=tf.uint8)
 
     # Set static shape so that tensorflow knows shape at compile time.
@@ -133,10 +134,18 @@ def _infer_preprocess(img, swap_channel=False):
         
     return img, o_shape, n_shape
 
-def _eval_preprocess(img, label, shape, dataset):
-    if dataset == 'cityscapes':
+def _eval_preprocess(img, label, shape, dataset, ignore_label=255):
+    if dataset in ['cityscapes', 'cityscapes-mini']:
         img = tf.image.pad_to_bounding_box(img, 0, 0, shape[0], shape[1])
         img.set_shape([shape[0], shape[1], 3])
+
+        label = tf.cast(label, dtype=tf.float32)
+        label = label - ignore_label # Needs to be subtracted and later added due to 0 padding.
+        label = tf.image.pad_to_bounding_box(label, 0, 0, shape[0], shape[1])
+        label = label + ignore_label
+        label = tf.cast(label, dtype=tf.uint8)
+        label.set_shape([shape[0], shape[1], 1])
+
     else:
         img = tf.image.resize_images(img, shape, align_corners=True)
      
@@ -178,7 +187,7 @@ class ImageReader(object):
             
         else: # Evaluation phase            
             dataset = dataset.map(lambda x, y: 
-                                  _eval_preprocess(x, y, cfg.param['eval_size'], cfg.dataset),
+                                  _eval_preprocess(x, y, cfg.param['eval_size'], cfg.dataset, cfg.param['ignore_label']),
                                   num_parallel_calls=cfg.N_WORKERS)
             dataset = dataset.batch(1)
                 
