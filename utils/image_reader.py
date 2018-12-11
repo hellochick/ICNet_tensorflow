@@ -135,7 +135,7 @@ def _infer_preprocess(img, swap_channel=False):
     return img, o_shape, n_shape
 
 def _eval_preprocess(img, label, shape, dataset, ignore_label=255):
-    if dataset in ['cityscapes', 'cityscapes-mini']:
+    if 'citycapes' in dataset:
         img = tf.image.pad_to_bounding_box(img, 0, 0, shape[0], shape[1])
         img.set_shape([shape[0], shape[1], 3])
 
