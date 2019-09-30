@@ -5,9 +5,9 @@ import tensorflow as tf
 import numpy as np
 from tqdm import trange
 
-from utils.config import Config
-from utils.image_reader import ImageReader
-from model import ICNet, ICNet_BN
+from .utils.config import Config
+from .utils.image_reader import ImageReader
+from .model import ICNet, ICNet_BN
 
 # mapping different model
 model_config = {'train': ICNet, 'trainval': ICNet, 'train_bn': ICNet_BN, 'trainval_bn': ICNet_BN, 'others': ICNet_BN}
@@ -29,14 +29,14 @@ def get_arguments():
     return parser.parse_args()
 
 def main():
-    args = get_arguments()  
+    args = get_arguments()
     cfg = Config(dataset=args.dataset, is_training=False, filter_scale=args.filter_scale)
-    
+
     model = model_config[args.model]
 
     reader = ImageReader(cfg=cfg, mode='eval')
     net = model(image_reader=reader, cfg=cfg, mode='eval')
-    
+
     # mIoU
     pred_flatten = tf.reshape(net.output, [-1,])
     label_flatten = tf.reshape(net.labels, [-1,])
@@ -51,14 +51,14 @@ def main():
         mIoU, update_op = tf.metrics.mean_iou(predictions=pred, labels=gt, num_classes=cfg.param['num_classes']+1)
     elif cfg.dataset == 'cityscapes':
         mIoU, update_op = tf.metrics.mean_iou(predictions=pred, labels=gt, num_classes=cfg.param['num_classes'])
-    
+
     net.create_session()
     net.restore(cfg.model_paths[args.model])
-    
+
     for i in trange(cfg.param['eval_steps'], desc='evaluation', leave=True):
         _ = net.sess.run(update_op)
-             
+
     print('mIoU: {}'.format(net.sess.run(mIoU)))
-    
+
 if __name__ == '__main__':
     main()

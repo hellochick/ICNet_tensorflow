@@ -9,7 +9,7 @@ BN_param_map = {'scale':    'gamma',
                 'offset':   'beta',
                 'variance': 'moving_variance',
                 'mean':     'moving_mean'}
-                
+
 def layer(op):
     '''Decorator for composable network layers.'''
     def layer_decorated(self, *args, **kwargs):
@@ -22,8 +22,10 @@ def layer(op):
             layer_input = self.terminals[0]
         else:
             layer_input = list(self.terminals)
+
         # Perform the operation and get the output.
         layer_output = op(self, layer_input, *args, **kwargs)
+
         # Add to layer LUT.
         self.layers[name] = layer_output
         layer_name.append(name)
@@ -43,11 +45,11 @@ class Network(object):
         self.terminals = []
         # Mapping from layer names to layers
         self.layers = dict(inputs)
-        
+
         self.trainable = trainable
 
         # Switch variable for dropout
-        self.use_dropout = tf.placeholder_with_default(tf.constant(1.0),
+        self.use_dropout = tf.compat.v1.placeholder_with_default(tf.constant(1.0),
                                                        shape=[],
                                                        name='use_dropout')
         self.filter_scale = cfg.filter_scale
@@ -57,34 +59,34 @@ class Network(object):
 
         self.setup()
 
-    def setup(self, is_training):
+    def setup(self):
         '''Construct the network. '''
         raise NotImplementedError('Must be implemented by the subclass.')
-    
+
     def create_session(self):
         # Set up tf session and initialize variables.
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
-        
+
         global_init = tf.global_variables_initializer()
         local_init = tf.local_variables_initializer()
-        
+
         self.sess = tf.Session(config=config)
         self.sess.run([global_init, local_init])
-        
+
     def restore(self, data_path, var_list=None):
         if data_path.endswith('.npy'):
             self.load_npy(data_path, self.sess)
         else:
             loader = tf.train.Saver(var_list=tf.global_variables())
             loader.restore(self.sess, data_path)
-        
+
         print('Restore from {}'.format(data_path))
-    
+
     def save(self, saver, save_dir, step):
         model_name = 'model.ckpt'
         checkpoint_path = os.path.join(save_dir, model_name)
-        
+
         if not os.path.exists(save_dir):
            os.makedirs(save_dir)
 
@@ -100,7 +102,7 @@ class Network(object):
         '''
         data_dict = np.load(data_path, encoding='latin1').item()
         for op_name in data_dict:
-            with tf.variable_scope(op_name, reuse=True):
+            with tf.compat.v1.variable_scope(op_name, reuse=True):
                 for param_name, data in data_dict[op_name].items():
                     try:
                         if 'bn' in op_name:
@@ -140,7 +142,7 @@ class Network(object):
 
     def make_var(self, name, shape):
         '''Creates a new TensorFlow variable.'''
-        return tf.get_variable(name, shape, trainable=self.trainable)
+        return tf.compat.v1.get_variable(name, shape, trainable=self.trainable)
 
     def get_layer_name(self):
         return layer_name
@@ -174,7 +176,7 @@ class Network(object):
             c_o *= self.filter_scale
 
         convolve = lambda i, k: tf.nn.conv2d(i, k, [1, s_h, s_w, 1], padding=padding,data_format=DEFAULT_DATAFORMAT)
-        with tf.variable_scope(name) as scope:
+        with tf.compat.v1.variable_scope(name) as scope:
             kernel = self.make_var('weights', shape=[k_h, k_w, c_i, c_o])
             output = convolve(input, kernel)
 
@@ -257,7 +259,7 @@ class Network(object):
     @layer
     def add(self, inputs, name):
         inputs[0] = tf.image.resize_bilinear(inputs[0], size=tf.shape(inputs[1])[1:3])
-        
+
         return tf.add_n(inputs, name=name)
 
     @layer
@@ -291,7 +293,7 @@ class Network(object):
 
     @layer
     def batch_normalization(self, input, name, scale_offset=True, relu=False):
-        output = tf.layers.batch_normalization(
+        output = tf.compat.v1.layers.batch_normalization(
                     input,
                     momentum=0.95,
                     epsilon=1e-5,

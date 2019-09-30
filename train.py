@@ -1,5 +1,5 @@
 """
-This code is based on DrSleep's framework: https://github.com/DrSleep/tensorflow-deeplab-resnet 
+This code is based on DrSleep's framework: https://github.com/DrSleep/tensorflow-deeplab-resnet
 """
 import argparse
 import os
@@ -9,14 +9,14 @@ import time
 import tensorflow as tf
 import numpy as np
 
-from model import ICNet_BN
-from utils.config import Config
-from utils.visualize import decode_labels
-from utils.image_reader import ImageReader, prepare_label
+from .model import ICNet_BN
+from .utils.config import Config
+from .utils.visualize import decode_labels
+from .utils.image_reader import ImageReader, prepare_label
 
 def get_arguments():
     parser = argparse.ArgumentParser(description="Reproduced ICNet")
-    
+
     parser.add_argument("--random-mirror", action="store_true",
                         help="Whether to randomly mirror the inputs during the training.")
     parser.add_argument("--random-scale", action="store_true",
@@ -44,6 +44,7 @@ def get_mask(gt, num_classes, ignore_label):
 def create_loss(output, label, num_classes, ignore_label):
     raw_pred = tf.reshape(output, [-1, num_classes])
     label = prepare_label(label, tf.stack(output.get_shape()[1:3]), num_classes=num_classes, one_hot=False)
+    resized_label = label
     label = tf.reshape(label, [-1,])
 
     indices = get_mask(label, num_classes, ignore_label)
@@ -53,7 +54,7 @@ def create_loss(output, label, num_classes, ignore_label):
     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pred, labels=gt)
     reduced_loss = tf.reduce_mean(loss)
 
-    return reduced_loss
+    return reduced_loss, resized_label
 
 def create_losses(net, label, cfg):
     # Get output from different branches
@@ -61,12 +62,17 @@ def create_losses(net, label, cfg):
     sub24_out = net.layers['sub24_out']
     sub124_out = net.layers['conv6_cls']
 
-    loss_sub4 = create_loss(sub4_out, label, cfg.param['num_classes'], cfg.param['ignore_label'])
-    loss_sub24 = create_loss(sub24_out, label, cfg.param['num_classes'], cfg.param['ignore_label'])
-    loss_sub124 = create_loss(sub124_out, label, cfg.param['num_classes'], cfg.param['ignore_label'])
+    loss_sub4, label4 = create_loss(sub4_out, label, cfg.param['num_classes'], cfg.param['ignore_label'])
+    loss_sub24, label24 = create_loss(sub24_out, label, cfg.param['num_classes'], cfg.param['ignore_label'])
+    loss_sub124, label124 = create_loss(sub124_out, label, cfg.param['num_classes'], cfg.param['ignore_label'])
+
+    # backup losses, predictions and labels for all sizes
+    names = ["loss_sub4","label4","sub4_out","loss_sub24","label24","sub24_out","loss_sub124","label124","sub124_out"]
+    for k,v in [(k,v) for k,v in locals().items() if k in names]:
+        net.layers[k] = v
 
     l2_losses = [cfg.WEIGHT_DECAY * tf.nn.l2_loss(v) for v in tf.trainable_variables() if 'weights' in v.name]
-    
+
     # Calculate weighted loss of three branches, you can tune LAMBDA values to get better results.
     reduced_loss = cfg.LAMBDA1 * loss_sub4 +  cfg.LAMBDA2 * loss_sub24 + cfg.LAMBDA3 * loss_sub124 + tf.add_n(l2_losses)
 
@@ -76,10 +82,10 @@ class TrainConfig(Config):
     def __init__(self, dataset, is_training,  filter_scale=1, random_scale=None, random_mirror=None):
         Config.__init__(self, dataset, is_training, filter_scale, random_scale, random_mirror)
 
-    # Set pre-trained weights here (You can download weight using `python script/download_weights.py`) 
+    # Set pre-trained weights here (You can download weight using `python script/download_weights.py`)
     # Note that you need to use "bnnomerge" version.
     model_weight = './model/cityscapes/icnet_cityscapes_train_30k_bnnomerge.npy'
-    
+
     # Set hyperparameters here, you can get much more setting in Config Class, see 'utils/config.py' for details.
     LAMBDA1 = 0.16
     LAMBDA2 = 0.4
@@ -92,13 +98,13 @@ def main():
     args = get_arguments()
 
     """
-    Get configurations here. We pass some arguments from command line to init configurations, for training hyperparameters, 
+    Get configurations here. We pass some arguments from command line to init configurations, for training hyperparameters,
     you can set them in TrainConfig Class.
 
     Note: we set filter scale to 1 for pruned model, 2 for non-pruned model. The filters numbers of non-pruned
           model is two times larger than prunde model, e.g., [h, w, 64] <-> [h, w, 32].
     """
-    cfg = TrainConfig(dataset=args.dataset, 
+    cfg = TrainConfig(dataset=args.dataset,
                 is_training=True,
                 random_scale=args.random_scale,
                 random_mirror=args.random_mirror,
@@ -107,7 +113,7 @@ def main():
 
     # Setup training network and training samples
     train_reader = ImageReader(cfg=cfg, mode='train')
-    train_net = ICNet_BN(image_reader=train_reader, 
+    train_net = ICNet_BN(image_reader=train_reader,
                             cfg=cfg, mode='train')
 
     loss_sub4, loss_sub24, loss_sub124, reduced_loss = create_losses(train_net, train_net.labels, cfg)
@@ -115,17 +121,17 @@ def main():
     # Setup validation network and validation samples
     with tf.variable_scope('', reuse=True):
         val_reader = ImageReader(cfg, mode='eval')
-        val_net = ICNet_BN(image_reader=val_reader, 
+        val_net = ICNet_BN(image_reader=val_reader,
                             cfg=cfg, mode='train')
 
         val_loss_sub4, val_loss_sub24, val_loss_sub124, val_reduced_loss = create_losses(val_net, val_net.labels, cfg)
 
-    # Using Poly learning rate policy 
+    # Using Poly learning rate policy
     base_lr = tf.constant(cfg.LEARNING_RATE)
     step_ph = tf.placeholder(dtype=tf.float32, shape=())
     learning_rate = tf.scalar_mul(base_lr, tf.pow((1 - step_ph / cfg.TRAINING_STEPS), cfg.POWER))
-    
-    # Set restore variable 
+
+    # Set restore variable
     restore_var = tf.global_variables()
     all_trainable = [v for v in tf.trainable_variables() if ('beta' not in v.name and 'gamma' not in v.name) or args.train_beta_gamma]
 
@@ -139,7 +145,7 @@ def main():
         opt_conv = tf.train.MomentumOptimizer(learning_rate, cfg.MOMENTUM)
         grads = tf.gradients(reduced_loss, all_trainable)
         train_op = opt_conv.apply_gradients(zip(grads, all_trainable))
-    
+
     # Create session & restore weights (Here we only need to use train_net to create session since we reuse it)
     train_net.create_session()
     train_net.restore(cfg.model_weight, restore_var)
@@ -148,18 +154,18 @@ def main():
     # Iterate over training steps.
     for step in range(cfg.TRAINING_STEPS):
         start_time = time.time()
-            
+
         feed_dict = {step_ph: step}
         if step % cfg.SAVE_PRED_EVERY == 0:
             loss_value, loss1, loss2, loss3, val_loss_value, _ = train_net.sess.run([reduced_loss, loss_sub4, loss_sub24, loss_sub124, val_reduced_loss, train_op], feed_dict=feed_dict)
             train_net.save(saver, cfg.SNAPSHOT_DIR, step)
         else:
-            loss_value, loss1, loss2, loss3, val_loss_value, _ = train_net.sess.run([reduced_loss, loss_sub4, loss_sub24, loss_sub124, val_reduced_loss, train_op], feed_dict=feed_dict)            
+            loss_value, loss1, loss2, loss3, val_loss_value, _ = train_net.sess.run([reduced_loss, loss_sub4, loss_sub24, loss_sub124, val_reduced_loss, train_op], feed_dict=feed_dict)
 
         duration = time.time() - start_time
         print('step {:d} \t total loss = {:.3f}, sub4 = {:.3f}, sub24 = {:.3f}, sub124 = {:.3f}, val_loss: {:.3f} ({:.3f} sec/step)'.\
                     format(step, loss_value, loss1, loss2, loss3, val_loss_value, duration))
-    
-    
+
+
 if __name__ == '__main__':
     main()

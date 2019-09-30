@@ -6,7 +6,7 @@ import cv2
 
 def read_labeled_image_list(data_dir, data_list):
     f = open(data_list, 'r')
-    
+
     images = []
     masks = []
     for line in f:
@@ -18,7 +18,7 @@ def read_labeled_image_list(data_dir, data_list):
         image = os.path.join(data_dir, image)
         mask = os.path.join(data_dir, mask)
         mask = mask.strip()
-        
+
         if not tf.gfile.Exists(image):
             raise ValueError('Failed to find file: ' + image)
 
@@ -36,28 +36,28 @@ def prepare_label(input_batch, new_size, num_classes, one_hot=True):
         input_batch = tf.squeeze(input_batch, axis=[3]) # reducing the channel dimension.
         if one_hot:
             input_batch = tf.one_hot(input_batch, depth=num_classes)
-            
+
     return input_batch
 
 def _extract_mean(img, img_mean, swap_channel=False):
     # swap channel and extract mean
-    
+
     if swap_channel:
         img_r, img_g, img_b = tf.split(axis=2, num_or_size_splits=3, value=img)
         img = tf.cast(tf.concat(axis=2, values=[img_b, img_g, img_r]), dtype=tf.float32)
 
     img -= img_mean
-    
+
     return img
 
 def _parse_function(image_filename, label_filename, img_mean):
     img_contents = tf.read_file(image_filename)
     label_contents = tf.read_file(label_filename)
-       
+
     # Decode image & label
     img = tf.image.decode_jpeg(img_contents, channels=3)
     label = tf.image.decode_png(label_contents, channels=1)
-    
+
     # swap channel and extract mean
     img = _extract_mean(img, img_mean, swap_channel=True)
 
@@ -100,7 +100,6 @@ def _random_crop_and_pad_image_and_labels(image, label, crop_h, crop_w, ignore_l
     combined_crop = tf.random_crop(combined_pad, [crop_h, crop_w, 4])
     img_crop = combined_crop[:, :, :last_image_dim]
     label_crop = combined_crop[:, :, last_image_dim:]
-    label_crop = label_crop + ignore_label
     label_crop = tf.cast(label_crop, dtype=tf.uint8)
 
     # Set static shape so that tensorflow knows shape at compile time.
@@ -111,14 +110,14 @@ def _random_crop_and_pad_image_and_labels(image, label, crop_h, crop_w, ignore_l
 
 def _check_input(img):
     ori_h, ori_w = img.get_shape().as_list()[1:3]
-    
+
     if ori_h % 32 != 0 or ori_w % 32 != 0:
         new_h = (int(ori_h/32) + 1) * 32
         new_w = (int(ori_w/32) + 1) * 32
         shape = [new_h, new_w]
-        
+
         img = tf.image.pad_to_bounding_box(img, 0, 0, new_h, new_w)
-        
+
         print('Image shape cannot divided by 32, padding to ({0}, {1})'.format(new_h, new_w))
     else:
         shape = [ori_h, ori_w]
@@ -127,11 +126,11 @@ def _check_input(img):
 
 def _infer_preprocess(img, swap_channel=False):
     o_shape = img.shape[0:2]
-        
+
     img = _extract_mean(img, swap_channel)
     img = tf.expand_dims(img, axis=0)
     img, n_shape = _check_input(img)
-        
+
     return img, o_shape, n_shape
 
 def _eval_preprocess(img, label, shape, dataset):
@@ -140,7 +139,7 @@ def _eval_preprocess(img, label, shape, dataset):
         img.set_shape([shape[0], shape[1], 3])
     else:
         img = tf.image.resize_images(img, shape, align_corners=True)
-     
+
     return img, label
 
 class ImageReader(object):
@@ -155,8 +154,8 @@ class ImageReader(object):
             print(cfg.param[mode+'_list'])
             self.dataset = self.create_tf_dataset(cfg)
 
-            self.next_image, self.next_label = self.dataset.make_one_shot_iterator().get_next() 
-    
+            self.next_image, self.next_label = self.dataset.make_one_shot_iterator().get_next()
+
     def create_tf_dataset(self, cfg):
         dataset = tf.data.Dataset.from_tensor_slices((self.image_list, self.label_list))
         dataset = dataset.map(lambda x, y: _parse_function(x, y, cfg.IMG_MEAN), num_parallel_calls=cfg.N_WORKERS)
@@ -169,21 +168,21 @@ class ImageReader(object):
             if cfg.random_mirror:
                 dataset = dataset.map(_image_mirroring, num_parallel_calls=cfg.N_WORKERS)
 
-            dataset = dataset.map(lambda x, y: 
+            dataset = dataset.map(lambda x, y:
                                   _random_crop_and_pad_image_and_labels(x, y, h, w, cfg.param['ignore_label']),
                                   num_parallel_calls=cfg.N_WORKERS)
-            
+
             dataset = dataset.shuffle(buffer_size=500)
             dataset = dataset.batch(cfg.BATCH_SIZE, drop_remainder=True)
             dataset = dataset.repeat()
-            
-        else: # Evaluation phase            
-            dataset = dataset.map(lambda x, y: 
+
+        else: # Evaluation phase
+            dataset = dataset.map(lambda x, y:
                                   _eval_preprocess(x, y, cfg.param['eval_size'], cfg.dataset),
                                   num_parallel_calls=cfg.N_WORKERS)
             dataset = dataset.batch(1)
-                
+
         return dataset
 
-    
-    
+
+
