@@ -23,7 +23,10 @@
   
 ## Environment Setup <a name="environment"></a>
 ```
-pip install tensorflow-gpu opencv-python jupyter matplotlib tqdm
+pip install tensorflow-gpu opencv-python jupyter matplotlib tqdm scipy googledrivedownloader
+# reinstall numpy to solve error about "allow_pickle=False"
+pip uninstall numpy 
+pip install --upgrade numpy==1.16.1
 ```
 
 ## Download Weights <a name="download-weights"></a>
