@@ -73,10 +73,12 @@ class Network(object):
         self.sess.run([global_init, local_init])
         
     def restore(self, data_path, var_list=None):
+        if var_list is None:
+            var_list = tf.global_variables()
         if data_path.endswith('.npy'):
-            self.load_npy(data_path, self.sess)
+            self.load_npy(data_path, self.sess, var_list=var_list)
         else:
-            loader = tf.train.Saver(var_list=tf.global_variables())
+            loader = tf.train.Saver(var_list=var_list)
             loader.restore(self.sess, data_path)
         
         print('Restore from {}'.format(data_path))
@@ -92,13 +94,16 @@ class Network(object):
         print('The checkpoint has been created, step: {}'.format(step))
 
     ## Restore from .npy
-    def load_npy(self, data_path, session, ignore_missing=False):
+    def load_npy(self, data_path, session, ignore_missing=False, var_list=None):
         '''Load network weights.
         data_path: The path to the numpy-serialized network weights
         session: The current TensorFlow session
         ignore_missing: If true, serialized weights for missing layers are ignored.
         '''
+        if var_list is None:
+            var_list = tf.global_variables()
         data_dict = np.load(data_path, encoding='latin1').item()
+        var_names = [v.name for v in var_list]
         for op_name in data_dict:
             with tf.variable_scope(op_name, reuse=True):
                 for param_name, data in data_dict[op_name].items():
@@ -107,6 +112,9 @@ class Network(object):
                             param_name = BN_param_map[param_name]
 
                         var = tf.get_variable(param_name)
+                        if var.name not in var_names:
+                            print("Not restored: %s" % var.name)
+                            continue
                         session.run(var.assign(data))
                     except ValueError:
                         if not ignore_missing:
